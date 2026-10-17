@@ -1,5 +1,5 @@
 
-name: AppMarket Build and Release
+name: Android CI and Release
 
 on:
   workflow_dispatch:
@@ -17,18 +17,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: appmarket-build-${{ github.ref }}
+  group: android-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  android:
+  build:
     name: Build Android APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -42,7 +40,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Configure Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Configure Signing
@@ -50,183 +48,95 @@ jobs:
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          SIGNING_ALIAS: ${{ secrets.ALIAS }}
-          SIGNING_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "$SIGNING_KEY" ]; then
-            if [ -z "$KEY_STORE_PASSWORD" ] ||
-               [ -z "$SIGNING_ALIAS" ] ||
-               [ -z "$SIGNING_PASSWORD" ]; then
-              echo "::error::Android signing secrets are incomplete"
-              exit 1
-            fi
-
-            printf '%s' "$SIGNING_KEY" |
-              base64 --decode > "$GITHUB_WORKSPACE/keystore.jks"
-
-            test -s "$GITHUB_WORKSPACE/keystore.jks"
-
-            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/keystore.jks" >> "$GITHUB_ENV"
-          else
-            echo "::warning::No release keystore configured; Gradle will use its configured fallback signing."
-          fi
-
-      - name: Build Release APK
-        env:
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEYSTORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
 
-          ./gradlew :app:android:assembleRelease
-
-          mkdir -p release-assets
-
-          APK_FILE="$(find app/android/build/outputs/apk/release \
-            -type f -name '*.apk' -print -quit)"
-
-          if [ -z "$APK_FILE" ]; then
-            echo "::error::Release APK not found"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Missing SIGNING_KEY secret"
             exit 1
           fi
 
-          cp "$APK_FILE" release-assets/
+          if [ -z "$KEY_STORE_PASSWORD" ] ||
+             [ -z "$KEY_ALIAS" ] ||
+             [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Android signing secrets are incomplete"
+            exit 1
+          fi
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: AppMarket-Android
-          path: release-assets/*.apk
-          if-no-files-found: error
-          retention-days: 7
+          printf '%s' "$SIGNING_KEY" |
+            base64 --decode > "$GITHUB_WORKSPACE/keystore.jks"
 
-  desktop:
-    name: Build Desktop (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: Windows
-            os: windows-latest
-          - platform: macOS
-            os: macos-latest
-          - platform: Linux
-            os: ubuntu-latest
+          test -s "$GITHUB_WORKSPACE/keystore.jks"
 
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: zulu
-          java-version: "21"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Install Linux packaging tools
-        if: runner.os == 'Linux'
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/keystore.jks
+          KEYSTORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fakeroot
+          set -euo pipefail
 
-      - name: Build Desktop Package
+          chmod +x ./gradlew
+          ./gradlew :app:android:assembleRelease
+
+      - name: Collect APK
         shell: bash
         run: |
           set -euo pipefail
 
-          ./gradlew :app:desktop:packageDistributionForCurrentOS
-
-          OUTPUT_DIR="app/desktop/build/compose/binaries/main"
-
-          if [ ! -d "$OUTPUT_DIR" ]; then
-            echo "::error::Desktop output directory not found: $OUTPUT_DIR"
-            find app/desktop/build -type f \
-              \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \) || true
-            exit 1
-          fi
-
           mkdir -p release-assets
 
-          mapfile -t PACKAGES < <(
-            find "$OUTPUT_DIR" -type f \
-              \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \)
-          )
+          APK_DIR="app/android/build/outputs/apk/release"
 
-          if [ "${#PACKAGES[@]}" -eq 0 ]; then
-            echo "::error::No desktop installer was generated"
-            find app/desktop/build -type f || true
+          if [ ! -d "$APK_DIR" ]; then
+            echo "::error::APK output directory not found: $APK_DIR"
+            find app/android/build/outputs -type f -name '*.apk' || true
             exit 1
           fi
 
-          for package in "${PACKAGES[@]}"; do
-            cp "$package" release-assets/
-          done
+          find "$APK_DIR" -type f -name '*.apk' \
+            -exec cp {} release-assets/ \;
 
-          ls -lh release-assets/
+          if ! find release-assets -type f -name '*.apk' \
+            -print -quit | grep -q .; then
+            echo "::error::No APK was generated"
+            exit 1
+          fi
 
-      - name: Upload Desktop Packages
+          cd release-assets
+          sha256sum *.apk > SHA256SUMS.txt
+
+      - name: Upload APK Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AppMarket-${{ matrix.platform }}
+          name: AppMarket-Android-Release
           path: release-assets/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
   release:
     name: Publish GitHub Release
-    needs:
-      - android
-      - desktop
-
+    needs: build
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Download All Build Artifacts
+      - name: Download APK
         uses: actions/download-artifact@v4
         with:
-          pattern: AppMarket-*
+          name: AppMarket-Android-Release
           path: release-assets
-          merge-multiple: true
-
-      - name: Verify Packages and Generate Checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "### Release packages" >> "$GITHUB_STEP_SUMMARY"
-          ls -lh release-assets/ | tee -a "$GITHUB_STEP_SUMMARY"
-
-          if ! find release-assets -maxdepth 1 -type f \
-            \( -name '*.apk' -o -name '*.msi' \
-               -o -name '*.dmg' -o -name '*.deb' \) \
-            -print -quit | grep -q .; then
-            echo "::error::No release packages found"
-            exit 1
-          fi
-
-          find release-assets -maxdepth 1 -type f \
-            ! -name 'SHA256SUMS.txt' -print0 |
-            sort -z |
-            xargs -0 sha256sum > release-assets/SHA256SUMS.txt
 
       - name: Update Rolling Release Tag
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -234,35 +144,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git tag -f latest-ci "$GITHUB_SHA"
           git push --force origin refs/tags/latest-ci
 
-      - name: Create or Update GitHub Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v3
         with:
           token: ${{ github.token }}
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest-ci' }}
+          target_commitish: ${{ github.sha }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest CI Build' }}
           body: |
-            Automated AppMarket build.
+            Automated Android Release build.
 
             Commit: ${{ github.sha }}
-            Trigger: ${{ github.event_name }}
 
-            Packages:
-            - Android APK
-            - Windows MSI
-            - macOS DMG
-            - Linux DEB
-
-            See SHA256SUMS.txt for package checksums.
+            Includes:
+            - Android Release APK
+            - SHA256SUMS.txt
           files: |
             release-assets/*.apk
-            release-assets/*.msi
-            release-assets/*.dmg
-            release-assets/*.deb
             release-assets/SHA256SUMS.txt
           overwrite_files: true
           fail_on_unmatched_files: true
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
           make_latest: ${{ startsWith(github.ref, 'refs/tags/') }}
+          
