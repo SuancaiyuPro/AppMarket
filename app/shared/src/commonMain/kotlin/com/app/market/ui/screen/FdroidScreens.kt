@@ -21,6 +21,8 @@ import com.app.market.resources.fdroid_official_summary
 import com.app.market.resources.fdroid_enabled
 import com.app.market.resources.fdroid_enabled_summary
 import com.app.market.resources.fdroid_repositories
+import com.app.market.resources.fdroid_source
+import com.app.market.resources.nav_fdroid
 import com.app.market.resources.fdroid_tuna
 import com.app.market.resources.fdroid_tuna_summary
 import com.app.market.ui.component.CardSegmentContainer
