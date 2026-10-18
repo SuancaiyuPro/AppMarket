@@ -7,8 +7,8 @@ import com.app.market.domain.model.download.DownloadPart
 import com.app.market.domain.model.download.DownloadState
 import com.app.market.domain.repository.DownloadRepository
 import io.ktor.client.HttpClient
+import io.ktor.client.call.body
 import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,7 +72,8 @@ class FdroidViewModel(
         viewModelScope.launch {
             runCatching {
                 val base = if (source == "tuna") TUNA_REPO else OFFICIAL_REPO
-                val body = client.get("${base}index-v1.json").bodyAsText()
+                val jar = client.get("${base}index-v1.jar").body<ByteArray>()
+                val body = verifyFdroidIndexJar(jar)
                 withContext(Dispatchers.Default) { parseIndex(body, base) }
             }.onSuccess { apps ->
                 if (generation == loadGeneration) _uiState.update { it.copy(loading = false, apps = apps, error = "") }
@@ -108,7 +109,7 @@ class FdroidViewModel(
         val appsById = (root["apps"] as? JsonArray).orEmpty().associateBy { it.string("packageName") }
         val packages = root["packages"]?.jsonObject ?: error("F-Droid index has no packages")
         return packages.mapNotNull { (id, versionsElement) ->
-            val metadata = appsById[id] ?: return@mapNotNull null
+            val metadata = appsById[id] as? JsonObject ?: return@mapNotNull null
             val version = (versionsElement as? JsonArray)?.mapNotNull { it as? JsonObject }
                 ?.filter {
                     val hash = it.string("hash")
