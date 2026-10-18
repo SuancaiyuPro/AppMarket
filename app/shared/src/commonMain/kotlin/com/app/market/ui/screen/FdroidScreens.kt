@@ -1,20 +1,32 @@
 package com.app.market.ui.screen
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import com.app.market.domain.model.download.DownloadState
 import com.app.market.resources.Res
 import com.app.market.resources.fdroid_official
 import com.app.market.resources.fdroid_official_summary
@@ -22,15 +34,31 @@ import com.app.market.resources.fdroid_enabled
 import com.app.market.resources.fdroid_enabled_summary
 import com.app.market.resources.fdroid_repositories
 import com.app.market.resources.fdroid_source
-import com.app.market.resources.nav_fdroid
 import com.app.market.resources.fdroid_tuna
 import com.app.market.resources.fdroid_tuna_summary
+import com.app.market.resources.install
+import com.app.market.resources.search_hint
+import com.app.market.resources.retry
+import com.app.market.resources.loading
+import com.app.market.resources.back
+import com.app.market.resources.nav_fdroid
 import com.app.market.ui.component.CardSegmentContainer
 import com.app.market.ui.component.MainTabScaffold
 import com.app.market.ui.component.MarketScaffold
 import com.app.market.ui.component.PageVerticalPadding
+import com.app.market.ui.component.AppActionButton
+import com.app.market.ui.model.AppActionKind
+import com.app.market.ui.util.formatSize
+import com.app.market.viewmodel.FdroidApp
+import com.app.market.viewmodel.FdroidViewModel
 import com.app.market.viewmodel.ThemeSettingsViewModel
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
@@ -83,28 +111,107 @@ fun FdroidRepositoriesScreen(viewModel: ThemeSettingsViewModel, onBack: () -> Un
 
 @Composable
 fun FdroidTab(bottomPadding: Dp) {
-    val settings = org.koin.compose.koinInject<ThemeSettingsViewModel>()
+    val settings = koinInject<ThemeSettingsViewModel>()
+    val viewModel = koinInject<FdroidViewModel>()
     val state by settings.uiState.collectAsStateWithLifecycle()
-    val uriHandler = LocalUriHandler.current
+    val ui by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadStates by viewModel.downloadStates.collectAsStateWithLifecycle()
+    LaunchedEffect(state.fdroidSource) { viewModel.load(state.fdroidSource) }
     MainTabScaffold(title = stringResource(Res.string.nav_fdroid)) { topPadding, backdrop, behavior ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().then(backdrop).scrollEndHaptic().overScrollVertical()
                 .nestedScroll(behavior.nestedScrollConnection),
             contentPadding = PaddingValues(top = topPadding + PageVerticalPadding, bottom = bottomPadding + PageVerticalPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                CardSegmentContainer(isFirst = true, isLast = true, horizontalPadding = 12.dp) {
-                    val isTuna = state.fdroidSource == "tuna"
-                    ArrowPreference(
-                        title = stringResource(if (isTuna) Res.string.fdroid_tuna else Res.string.fdroid_official),
-                        summary = stringResource(if (isTuna) Res.string.fdroid_tuna_summary else Res.string.fdroid_official_summary),
-                        onClick = {
-                            val baseUrl = if (isTuna) "https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/" else "https://f-droid.org/repo/"
-                            uriHandler.openUri("${baseUrl}?fingerprint=43238D512C1E5EB2D6569F4A3AFBF5523418B82E0A3ED1552770ABB9A9C9CCAB")
-                        },
-                    )
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                    TextField(value = ui.query, onValueChange = viewModel::setQuery,
+                        label = stringResource(Res.string.search_hint), singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            if (ui.loading) item {
+                Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                    InfiniteProgressIndicator(size = 24.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(Res.string.loading))
+                }
+            }
+            if (ui.error.isNotBlank()) item {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(ui.error, color = MiuixTheme.colorScheme.error)
+                        Text(stringResource(Res.string.retry), modifier = Modifier.clickable { viewModel.load(state.fdroidSource, true) },
+                            color = MiuixTheme.colorScheme.primary)
+                    }
+                }
+            }
+            if (ui.selected != null) {
+                item(key = "detail") {
+                    val selected = ui.selected!!
+                    FdroidDetailCard(selected, downloadStates[selected.packageName],
+                        { viewModel.select(null) }, { viewModel.install(selected) }, viewModel::installDownloaded, viewModel::cancel)
+                }
+            } else {
+                items(ui.filteredApps, key = { it.packageName }) { app ->
+                    FdroidAppRow(app, downloadStates[app.packageName], { viewModel.select(app) }, { viewModel.install(app) }, viewModel::installDownloaded, viewModel::cancel)
                 }
             }
         }
     }
 }
+
+@Composable
+private fun FdroidAppRow(app: FdroidApp, downloadState: DownloadState?, onOpen: () -> Unit, onInstall: () -> Unit, onInstallDownloaded: (String) -> Unit, onCancel: (String) -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(52.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(app.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(app.summary.ifBlank { app.packageName }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
+                Text("${app.versionName} · ${formatSize(app.size)}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    style = MiuixTheme.textStyles.body2)
+            }
+            Spacer(Modifier.width(8.dp))
+            FdroidAction(app.packageName, downloadState, onInstall, onInstallDownloaded, onCancel)
+        }
+    }
+}
+
+@Composable
+private fun FdroidDetailCard(app: FdroidApp, downloadState: DownloadState?, onBack: () -> Unit, onInstall: () -> Unit, onInstallDownloaded: (String) -> Unit, onCancel: (String) -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("‹  ${stringResource(Res.string.back)}", Modifier.clickable(onClick = onBack), color = MiuixTheme.colorScheme.primary)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(56.dp))
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(app.name, style = MiuixTheme.textStyles.title2)
+                    Text(app.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                }
+            }
+            Text("版本 ${app.versionName} · ${formatSize(app.size)}", style = MiuixTheme.textStyles.body2)
+            Text(app.description.ifBlank { app.summary }, maxLines = 16, overflow = TextOverflow.Ellipsis)
+            FdroidAction(app.packageName, downloadState, onInstall, onInstallDownloaded, onCancel, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun FdroidAction(packageName: String, state: DownloadState?, onInstall: () -> Unit, onInstallDownloaded: (String) -> Unit, onCancel: (String) -> Unit, modifier: Modifier = Modifier) {
+    AppActionButton(
+        packageName = packageName,
+        actionText = stringResource(Res.string.install),
+        actionKind = AppActionKind.INSTALL,
+        downloadState = state,
+        modifier = modifier,
+        onAction = onInstall,
+        onResumeDownload = onInstall,
+        onInstallDownloaded = onInstallDownloaded,
+        onCancel = onCancel,
+    )
+}
+
