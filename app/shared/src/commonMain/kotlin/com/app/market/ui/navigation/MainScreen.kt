@@ -51,6 +51,7 @@ import com.app.market.domain.repository.ThemePreferencesRepository
 import com.app.market.platform.UiPlatform
 import com.app.market.resources.Res
 import com.app.market.resources.nav_search
+import com.app.market.resources.nav_fdroid
 import com.app.market.resources.nav_settings
 import com.app.market.resources.nav_today
 import com.app.market.resources.nav_updates
