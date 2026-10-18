@@ -16,13 +16,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 data class FdroidApp(
     val packageName: String,
@@ -35,6 +28,7 @@ data class FdroidApp(
     val size: Long,
     val sha256: String,
     val iconUrl: String,
+    val iconFallbackUrls: List<String> = emptyList(),
 )
 
 data class FdroidUiState(
@@ -47,7 +41,7 @@ data class FdroidUiState(
 ) {
     val filteredApps: List<FdroidApp> get() = if (query.isBlank()) apps else apps.filter {
         it.name.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true) ||
-            it.summary.contains(query, ignoreCase = true)
+            it.summary.contains(query, ignoreCase = true) || it.description.contains(query, ignoreCase = true)
     }
 }
 
@@ -73,8 +67,7 @@ class FdroidViewModel(
             runCatching {
                 val base = if (source == "tuna") TUNA_REPO else OFFICIAL_REPO
                 val jar = client.get("${base}index-v1.jar").body<ByteArray>()
-                val body = verifyFdroidIndexJar(jar)
-                withContext(Dispatchers.Default) { parseIndex(body, base) }
+                withContext(Dispatchers.Default) { parseVerifiedFdroidIndexJar(jar, base) }
             }.onSuccess { apps ->
                 if (generation == loadGeneration) _uiState.update { it.copy(loading = false, apps = apps, error = "") }
             }.onFailure { error ->
@@ -103,47 +96,6 @@ class FdroidViewModel(
             installAfterDownload = true,
         )
     }
-
-    private fun parseIndex(text: String, base: String): List<FdroidApp> {
-        val root = Json.parseToJsonElement(text).jsonObject
-        val appsById = (root["apps"] as? JsonArray).orEmpty().associateBy { it.string("packageName") }
-        val packages = root["packages"]?.jsonObject ?: error("F-Droid index has no packages")
-        return packages.mapNotNull { (id, versionsElement) ->
-            val metadata = appsById[id] as? JsonObject ?: return@mapNotNull null
-            val version = (versionsElement as? JsonArray)?.mapNotNull { it as? JsonObject }
-                ?.filter {
-                    val hash = it.string("hash")
-                    it.long("versionCode") > 0 && it.string("apkName").isNotBlank() &&
-                        it.string("hashType", "sha256").equals("sha256", true) &&
-                        hash.length == 64 && hash.all { char -> char in '0'..'9' || char.lowercaseChar() in 'a'..'f' }
-                }
-                ?.maxByOrNull { it.long("versionCode") } ?: return@mapNotNull null
-            val localized = metadata["localized"] as? JsonObject
-            val locale = localized?.get("zh-CN") as? JsonObject ?: localized?.get("en-US") as? JsonObject
-            val icon = locale?.string("icon").takeUnless { it.isNullOrBlank() } ?: metadata.string("icon")
-            val name = locale?.string("name").takeUnless { it.isNullOrBlank() } ?: metadata.string("name", id)
-            val summary = locale?.string("summary").takeUnless { it.isNullOrBlank() } ?: metadata.string("summary")
-            val description = locale?.string("description").takeUnless { it.isNullOrBlank() } ?: metadata.string("description")
-            val hash = version.string("hash")
-            FdroidApp(
-                packageName = id,
-                name = name,
-                summary = summary,
-                description = description,
-                versionName = version.string("versionName"),
-                versionCode = version.long("versionCode"),
-                apkName = version.string("apkName"),
-                size = version.long("size"),
-                sha256 = hash.takeIf { version.string("hashType", "sha256").equals("sha256", true) }.orEmpty(),
-                iconUrl = if (icon.isBlank()) "" else "${base}icons-640/$icon",
-            )
-        }.sortedBy { it.name.lowercase() }
-    }
-
-    private fun JsonElement?.string(key: String, default: String = ""): String =
-        (this as? JsonObject)?.get(key)?.jsonPrimitive?.contentOrNull ?: default
-
-    private fun JsonElement?.long(key: String): Long = string(key).toLongOrNull() ?: 0L
 
     private companion object {
         const val OFFICIAL_REPO = "https://f-droid.org/repo/"
