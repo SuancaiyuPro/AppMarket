@@ -18,6 +18,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -163,9 +166,14 @@ fun FdroidTab(bottomPadding: Dp) {
 
 @Composable
 private fun FdroidAppRow(app: FdroidApp, downloadState: DownloadState?, onOpen: () -> Unit, onInstall: () -> Unit, onInstallDownloaded: (String) -> Unit, onCancel: (String) -> Unit) {
+    var iconIndex by remember(app.packageName) { mutableIntStateOf(0) }
+    val iconUrls = remember(app.packageName, app.iconUrl, app.iconFallbackUrls) { listOf(app.iconUrl).filter(String::isNotBlank) + app.iconFallbackUrls }
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(52.dp))
+            if (iconUrls.isNotEmpty()) AsyncImage(
+                model = iconUrls.getOrNull(iconIndex), contentDescription = null, modifier = Modifier.size(52.dp),
+                onError = { if (iconIndex < iconUrls.lastIndex) iconIndex++ },
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(app.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -182,11 +190,16 @@ private fun FdroidAppRow(app: FdroidApp, downloadState: DownloadState?, onOpen: 
 
 @Composable
 private fun FdroidDetailCard(app: FdroidApp, downloadState: DownloadState?, onBack: () -> Unit, onInstall: () -> Unit, onInstallDownloaded: (String) -> Unit, onCancel: (String) -> Unit) {
+    var iconIndex by remember(app.packageName) { mutableIntStateOf(0) }
+    val iconUrls = remember(app.packageName, app.iconUrl, app.iconFallbackUrls) { listOf(app.iconUrl).filter(String::isNotBlank) + app.iconFallbackUrls }
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("‹  ${stringResource(Res.string.back)}", Modifier.clickable(onClick = onBack), color = MiuixTheme.colorScheme.primary)
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(56.dp))
+                if (iconUrls.isNotEmpty()) AsyncImage(
+                    model = iconUrls.getOrNull(iconIndex), contentDescription = null, modifier = Modifier.size(56.dp),
+                    onError = { if (iconIndex < iconUrls.lastIndex) iconIndex++ },
+                )
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(app.name, style = MiuixTheme.textStyles.title2)
