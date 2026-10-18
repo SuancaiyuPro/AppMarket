@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - fdroid-repository-settings
     tags:
       - "v*"
     paths-ignore:
@@ -121,6 +122,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
     needs: build
     runs-on: ubuntu-latest
 
@@ -174,3 +176,4 @@ jobs:
           fail_on_unmatched_files: true
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
           make_latest: ${{ startsWith(github.ref, 'refs/tags/') }}
+
