@@ -4,6 +4,7 @@ import com.app.market.viewmodel.AppDetailViewModel
 import com.app.market.viewmodel.DeviceProfileViewModel
 import com.app.market.viewmodel.DownloadingAppsViewModel
 import com.app.market.viewmodel.HistoricalVersionsViewModel
+import com.app.market.viewmodel.FdroidViewModel
 import com.app.market.viewmodel.IgnoredAppsViewModel
 import com.app.market.viewmodel.InstallerSettingsViewModel
 import com.app.market.viewmodel.ManualUpdateViewModel
@@ -19,6 +20,7 @@ import org.koin.dsl.module
 val viewModelModule = module {
     viewModelOf(::UpdatesViewModel)
     viewModelOf(::ThemeSettingsViewModel)
+    viewModelOf(::FdroidViewModel)
     viewModelOf(::UpdateHistoryViewModel)
     viewModelOf(::SearchViewModel)
     viewModelOf(::SavedPackagesViewModel)
@@ -31,3 +33,4 @@ val viewModelModule = module {
     viewModelOf(::AppDetailViewModel)
     viewModelOf(::TodayViewModel)
 }
+
